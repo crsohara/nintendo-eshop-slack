@@ -1,0 +1,17 @@
+{
+  "name": "eshopdealz",
+  "version": "0.0.1",
+  "description": "",
+  "main": "index.js",
+  "dependencies": {
+    "minimist": "^1.2.0",
+    "nintendo-switch-eshop": "^1.1.1",
+    "request": "^2.87.0"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC"
+}
