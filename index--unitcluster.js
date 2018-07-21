@@ -6,6 +6,7 @@ const region = switchEshop.Region.EUROPE;
 
 module.exports = function(unit) {
   const SLACK_URL = unit.config.SLACK_WEBHOOK;
+  const GAMELIST = unit.config.GAMELIST;
   function getGamesByRegion(region) {
     switch (region) {
       case switchEshop.Region.AMERICAS:
@@ -18,7 +19,7 @@ module.exports = function(unit) {
 
       case switchEshop.Region.ASIA:
         return switchEshop.getGamesJapan();
-        break
+        break;
 
       default:
         break;
@@ -39,7 +40,8 @@ module.exports = function(unit) {
 
   function getSingleGameInfo(title, region) {
     return getGamesByRegion(region).then( games => {
-      return games.find( game => game.title.toLocaleLowerCase().startsWith(title) );
+      let x = games.find( game => game.title.toLocaleLowerCase().startsWith(title) );
+      return x;
     });
   }
 
@@ -52,9 +54,14 @@ module.exports = function(unit) {
     let discountPrice = game.price_sorting_f;
     let enddate = '';
 
+    if (prices.prices !== undefined) {
+      prices.regular_price = prices.prices[0].regular_price;
+      prices.regular_price = prices.prices[0].discount_price;
+    }
+
     if (prices.discount_price) {
       let date = new Date(prices.discount_price.end_datetime);
-      enddate = ` Ends ${date.getDate()}/${date.getMonth() + 1}/${date.getFullYear()}`;
+      enddate = ` Ends ${date.getDate()}/${date.getMonth()}/${date.getFullYear()}`;
       discountPrice = prices.discount_price.raw_value;
     }
 
@@ -62,16 +69,28 @@ module.exports = function(unit) {
   }
 
   function formatPriceString(gameList, priceList) {
+
     if (priceList === null) {
       return `*${gameList.title}*: normal price: *€${gameList.price_sorting_f}*`;
-    } else {
-      return gameList.map( game => {
-        let price = priceList.find( price => parseInt(game.nsuid_txt[0]) === price.title_id )
 
-        if (price) {
+    } else {
+
+      return gameList.map( game => {
+        let price;
+        if (!Array.isArray(priceList)) {
+          price = priceList;
+        } else {
+          price = priceList.find( price => parseInt(game.nsuid_txt[0]) === price.title_id );
+        }
+
+        if (game.price_has_discount_b) {
           return formatSalePriceString(game, price);
         } else {
-          return `*${game.title}*: normal price: *€${game.price_sorting_f}*`;
+          if (price.prices !== undefined) {
+            return `*${game.title}*: normal price: *€${price.prices[0].regular_price.raw_value}*`;
+          } else {
+            return `*${game.title}*: normal price: *€${price.regular_price.raw_value}*`;
+          }
         }
       });
     }
@@ -79,7 +98,9 @@ module.exports = function(unit) {
 
   function formatGameListPrices(gameList) {
     if (!Array.isArray(gameList)) {
-      return formatPriceString(gameList, null)
+      return getPricesList(gameList.nsuid_txt[0]).then(priceInfo => {
+        return formatPriceString([gameList], priceInfo)
+      });
     }
 
     let nsuid_txtList = gameList.map( game => game.nsuid_txt[0]);
@@ -100,13 +121,13 @@ module.exports = function(unit) {
   function getDiscountedGameList() { // no args
     return getAllDiscountedGames(region).then( gameList => {
       return formatGameListPrices(gameList);
-    });
+    }).catch( error => console.log(error));
   }
 
   function getMultipleGamePriceByTitle(title) { // -s
     return getMultipleGameInfo(title, region).then( gameList => {
       return formatGameListPrices(gameList);
-    });
+    }).catch( error => console.log(error));
   }
 
   function notifySlack(payload) {
@@ -114,6 +135,7 @@ module.exports = function(unit) {
       url: SLACK_URL,
       json: payload
     }
+    options.json.text = "-- *eSHOP CURRENT DEALS* --\n" + options.json.text;
     request.post( options, notifySlackCallback );
     unit.done(null, payload);
   }
@@ -144,7 +166,7 @@ module.exports = function(unit) {
       getDiscountedGameList().then( payload => {
         Promise.all(payload).then( string => {
           notifySlack( { text: string.join('\n') } );
-        });
+        }).catch( error => console.log(error));
       });
 
     } else if (query.type === 'l') { // list
@@ -166,6 +188,20 @@ module.exports = function(unit) {
         notifySlack( { text: string.join('\n') } );
       }).catch( error => console.log(error));
 
+    } else {
+      let list = GAMELIST.split(',');
+      let payload = list.map( title => {
+        return getGamePriceByTitle(title);
+      });
+
+      Promise.all(payload).then( string => {
+        let joinedstring = string.join('\n');
+        if (joinedstring.indexOf('until') !== -1) {
+          notifySlack( { text: joinedstring } );
+        } else {
+           unit.done(null, joinedstring);
+        }
+      }).catch( error => console.log(error));
     }
   }
   init(unit.req.uri.query);
